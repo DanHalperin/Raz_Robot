@@ -4,7 +4,7 @@ import numpy as np
 import time
 
 import serial
-
+ABU = "asdsad"
 frameWidth = 640
 frameHeight = 480
 cap = cv2.VideoCapture(0)
