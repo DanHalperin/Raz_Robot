@@ -1,8 +1,3 @@
-
-
-
-
-
 import cv2
 import imutils
 import numpy as np
@@ -166,6 +161,17 @@ def get_new_colors_range(img):
     mask = cv2.dilate(mask, kernel, iterations=1)
     cv2.imshow("tracker", mask)
     print(x)
+
+
+def calibration():
+
+    current_pos = None
+    while True:
+        success, img = cap.read()
+        imgResult = img.copy()
+        blue_range = myColors[BLUE]
+        lower, upper = blue_range[:3], blue_range[3:]
+        mask = cv2.inRange(imgResult, lower, upper)
 
 
 if __name__ == '__main__':
