@@ -165,13 +165,49 @@ def get_new_colors_range(img):
 
 def calibration():
 
-    current_pos = None
-    while True:
-        success, img = cap.read()
-        imgResult = img.copy()
+    def find_local_pos():
         blue_range = myColors[BLUE]
         lower, upper = blue_range[:3], blue_range[3:]
-        mask = cv2.inRange(imgResult, lower, upper)
+        while True:
+            success, img = cap.read()
+            imgResult = img.copy()
+            mask = cv2.inRange(imgResult, lower, upper)
+            contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            if len(contours):
+                largest = max(contours, key=lambda x: cv2.contourArea(x))
+                current_pos, r = cv2.minEnclosingCircle(largest)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    return current_pos
+
+    first_pos = np.array(find_local_pos())
+    BLUETOOTH.write(str.encode(str(0)))
+    time.sleep(2)
+    second_pos = np.array(find_local_pos())
+    return find_angel(first_pos, second_pos)
+
+
+def fix_obst_and_target():
+
+    obst, obst_cnt = [], []
+    tar, tar_cnt = [], []
+    while True:
+        success, imgResult = cap.read()
+        newPoints, cnts = findColor(imgResult, myColors)
+        indices = np.where(newPoints == GREEN)[0]
+        if len(indices):
+            obst = newPoints[indices]
+            obst_cnt = cnts[indices]
+            [draw_cnt(p, c) for p, c in zip(robot, robot_cnt)]
+
+        indices = np.where(newPoints == RED)[0]
+        if len(indices):
+            tar = newPoints[indices]
+            tar_cnt = cnts[indices]
+            [draw_cnt(p, c) for p, c in zip(robot, robot_cnt)]
+
+        if (cv2.waitKey(1) & 0xFF == ord('q')) and len(tar) and len(obst):
+            return obst, obst_cnt, tar, tar_cnt
+
 
 
 if __name__ == '__main__':
