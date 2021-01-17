@@ -2,8 +2,9 @@ import cv2
 import imutils
 import numpy as np
 import time
-
+import scipy.cluster.hierarchy as hcluster
 import serial
+from scipy.spatial.distance import cdist
 
 frameWidth = 640
 frameHeight = 480
@@ -16,13 +17,13 @@ GREEN = 0
 RED = 1
 BLUE = 2
 DAN = 3
-K = 3
 
 FORWARD = 0
 RIGHT = 1
 LEFT = 2
 
 OBJECTS_TYPE = {RED: ("Target", (0, 0, 255)), GREEN: ("Obsticle", (0, 255, 0)), BLUE: ("Robot", (255, 0, 0)), DAN: ("Dan", (0, 0, 0))}
+AREAS_THRESH = [250, 250, 250]
 GOING_TO_TARGET = 0
 
 PASSING_BY_OBSTACLE = 1
@@ -31,10 +32,14 @@ PORT = 'COM9'
 #BLUETOOTH = serial.Serial(PORT, 9600)
 #BLUETOOTH.flushInput()
 
-myColors = [[0, 100, 0, 113, 199, 170],    #green
-            [171,101,174,179,252,255], #red
-            [66,48,153,110,255,255]]#   #blue
-            # list((12, 91, 83, 60, 255, 251))]
+# myColors = [[0, 100, 0, 113, 199, 170],    #green
+#             [171,101,174,179,252,255], #red
+#             [66,48,153,110,255,255]]#   #blue
+#             # list((12, 91, 83, 60, 255, 251))]
+
+myColors = [[39, 43, 83, 91, 105, 204],    #green
+            [], #red
+            [70, 162, 0, 255, 255, 255]]#   #blue
 
 
 def create_color_trackbar(name="tracker"):
@@ -87,7 +92,8 @@ def get_contours(img, color):
     points, res_contours = [], []
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area > 170:
+        if area > AREAS_THRESH[color]:
+            AREAS_THRESH[color] = max(AREAS_THRESH[color], area * 0.25)
             ((mid_x, mid_y), r) = cv2.minEnclosingCircle(cnt)
             mid_x, mid_y = int(mid_x), int(mid_y)
             if mid_x != 0 and mid_y != 0:
@@ -119,69 +125,99 @@ def is_too_close_to_object(robot, obj):
 
 def remove_noise_contours(points):
 
-    if len(points) < K:
-        return [], []
+    if len(points) < 2:
+        return np.array(points), np.arange(len(points))
 
-    res, indices = [], []
     points = np.array(points)
-    xy = points[:, :2]
-
+    xy = points[:, :2].astype("float32")
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    ret, label, means = cv2.kmeans(np.float32(xy), K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
 
-    for i, mean in enumerate(means):
-        curr_points = points[label.flatten() == i]
-        dominant_p = max(curr_points, key=lambda x: x[2])
-        res.append(dominant_p)
-        indices.append(np.array(np.where(np.all(points==dominant_p, axis=1))).flatten()[0])
-    return np.array(res), np.array(indices)
+    # Use cross-validation to find the correct amount of clusters in the image, in order to remove the colliding
+    # classifications.
+    K = 2
+    while True:
+
+        res, indices, found_k = [], [], True
+        ret, label, means = cv2.kmeans(xy, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+        for i, mean in enumerate(means):
+            curr_points = points[label.flatten() == i]
+            dominant_p = max(curr_points, key=lambda x: x[2])
+            dist = cdist(curr_points[:, :2], dominant_p[:2][None])
+
+            if len(np.where(dist > dominant_p[2])[0]):
+                K += 1
+                found_k = False
+                break
+
+            res.append(dominant_p)
+            indices.append(np.array(np.where(np.all(points == dominant_p, axis=1))).flatten()[0])
+        if found_k:
+            return np.array(res), np.array(indices)
 
 
-def draw_cnt(p, cnt):
+def draw_cnt(img, p, cnt):
 
     p = tuple(p)
     text, heu = OBJECTS_TYPE[p[3]]
     x, y, h, w = cv2.boundingRect(cnt)
-    cv2.rectangle(imgResult, (x, y), (x + h, y + w), heu, 2)
-    cv2.putText(imgResult, text, (x, y - 5), cv2.FONT_HERSHEY_COMPLEX, 0.7, heu, 2)
-    cv2.drawContours(imgResult, cnt, -1, (90, 26, 170), 3)
-    cv2.circle(imgResult, p[:2], p[2] + 10, (60, 200, 110), 2)
+    cv2.rectangle(img, (x, y), (x + h, y + w), heu, 2)
+    cv2.putText(img, text, (x, y - 5), cv2.FONT_HERSHEY_COMPLEX, 0.7, heu, 2)
+    cv2.drawContours(img, cnt, -1, (90, 26, 170), 3)
+    cv2.circle(img, p[:2], p[2] + 10, (60, 200, 110), 2)
 
 
-def get_new_colors_range(img):
-    if cv2.getTrackbarPos('1_high', "tracker") == -1:
-        create_color_trackbar("tracker")
-    x = get_color_trackbar_values()
-    imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lower = np.array(x[0:3])
-    upper = np.array(x[3:6])
-    mask = cv2.inRange(imgHSV, lower, upper)
-    kernel = np.ones((5,5), dtype="uint8")
-    mask = cv2.erode(mask, kernel, iterations=1)
-    mask = cv2.dilate(mask, kernel, iterations=1)
-    cv2.imshow("tracker", mask)
-    print(x)
+def get_new_colors_range():
+    while True:
+
+        success, img = cap.read()
+        if cv2.getTrackbarPos('1_high', "tracker") == -1:
+            create_color_trackbar("tracker")
+        x = get_color_trackbar_values()
+        imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lower = np.array(x[0:3])
+        upper = np.array(x[3:6])
+        mask = cv2.inRange(imgHSV, lower, upper)
+        kernel = np.ones((5,5), dtype="uint8")
+        mask = cv2.erode(mask, kernel, iterations=1)
+        mask = cv2.dilate(mask, kernel, iterations=1)
+        cv2.imshow("tracker", mask)
+        print(x)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            exit(0)
 
 
-def calibration():
+def find_initinal_rob_angel():
+    """
+    Find the initial angel of the robot, by moving it forward for 2 seconds, and then find the angel between the
+    start and end positions.
+    :return: Angel of the robot within the camera capture.
+    """
 
     def find_local_pos():
         blue_range = myColors[BLUE]
         lower, upper = blue_range[:3], blue_range[3:]
+        lower, upper = (21, 52, 55), (51, 255, 255)
         while True:
             success, img = cap.read()
-            imgResult = img.copy()
-            mask = cv2.inRange(imgResult, lower, upper)
+            mask = cv2.inRange(img, lower, upper)
             contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            contours = imutils.grab_contours(contours)
             if len(contours):
                 largest = max(contours, key=lambda x: cv2.contourArea(x))
                 current_pos, r = cv2.minEnclosingCircle(largest)
+                p = (*[int(x) for x in current_pos], int(r), BLUE)
+                draw_cnt(img, p, largest)
+                cv2.imshow("Result", img)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     return current_pos
 
     first_pos = np.array(find_local_pos())
-    BLUETOOTH.write(str.encode(str(0)))
-    time.sleep(2)
+    # BLUETOOTH.write(str.encode(str(0)))
+    t_end = time.time() + 2
+    while time.time() < t_end:
+        success, img = cap.read()
+        cv2.imshow("Result", img)
     second_pos = np.array(find_local_pos())
     return find_angel(first_pos, second_pos)
 
@@ -197,13 +233,15 @@ def fix_obst_and_target():
         if len(indices):
             obst = newPoints[indices]
             obst_cnt = cnts[indices]
-            [draw_cnt(p, c) for p, c in zip(robot, robot_cnt)]
+            [draw_cnt(imgResult, p, c) for p, c in zip(obst, obst_cnt)]
 
         indices = np.where(newPoints == RED)[0]
         if len(indices):
             tar = newPoints[indices]
             tar_cnt = cnts[indices]
-            [draw_cnt(p, c) for p, c in zip(robot, robot_cnt)]
+            [draw_cnt(imgResult, p, c) for p, c in zip(tar, tar_cnt)]
+
+        cv2.imshow("Result", imgResult)
 
         if (cv2.waitKey(1) & 0xFF == ord('q')) and len(tar) and len(obst):
             return obst, obst_cnt, tar, tar_cnt
@@ -213,55 +251,50 @@ def fix_obst_and_target():
 if __name__ == '__main__':
 
     # Get new colors range
+    get_new_colors_range()
+    obst, obst_cnt, tar, tar_cnt = fix_obst_and_target()
+    find_initinal_rob_angel()
+    # iter = 0
+    # curr_state = GOING_TO_TARGET
+    # g_obstacles = None
+    # g_targets = None
+    # obstacles, target = [], []
     # while True:
-    #     success, img = cap.read()
-    #     imgResult = img.copy()
-    #     get_new_colors_range(img)
+    #     success, imgResult = cap.read()
+    #     newPoints, cnts = findColor(imgResult, myColors)
+    #
+    #     # Organize points according to role (Robot, obsticles, target)
+    #     indices = np.where(newPoints == BLUE)[0]
+    #     if len(indices):
+    #         robot = newPoints[indices]
+    #         robot_cnt = cnts[indices]
+    #         [draw_cnt(imgResult, p, c) for p, c in zip(robot, robot_cnt)]
+    #
+    #     indices = np.where(newPoints == RED)[0]
+    #     if len(indices):
+    #         target = newPoints[indices]
+    #         target_cnt = cnts[indices]
+    #         [draw_cnt(imgResult, p, c) for p, c in zip(target, target_cnt)]
+    #
+    #     indices = np.where(newPoints == GREEN)[0]
+    #     if len(indices):
+    #         obstacles = newPoints[indices]
+    #         obstacles_cnts = cnts[indices]
+    #         [draw_cnt(imgResult, p, c) for p, c in zip(obstacles, obstacles_cnts)]
+    #
+    #     indices = np.where(newPoints == DAN)[0]
+    #     if len(indices):
+    #         dan = newPoints[indices]
+    #         dan_cnt = cnts[indices]
+    #         [draw_cnt(imgResult, p, c) for p, c in zip(dan, dan_cnt)]
+    #
+    #     cv2.imshow("Result", imgResult)
+    #     time.sleep(0.1)
+    #
     #     if cv2.waitKey(1) & 0xFF == ord('q'):
-    #         exit(0)
-
-    iter = 0
-    curr_state = GOING_TO_TARGET
-    g_obstacles = None
-    g_targets = None
-    obstacles, target = [], []
-    while True:
-        success, img = cap.read()
-        imgResult = img.copy()
-        newPoints, cnts = findColor(img, myColors)
-
-        # Organize points according to role (Robot, obsticles, target)
-        indices = np.where(newPoints == BLUE)[0]
-        if len(indices):
-            robot = newPoints[indices]
-            robot_cnt = cnts[indices]
-            [draw_cnt(p, c) for p, c in zip(robot, robot_cnt)]
-
-        indices = np.where(newPoints == RED)[0]
-        if len(indices):
-            target = newPoints[indices]
-            target_cnt = cnts[indices]
-            [draw_cnt(p, c) for p, c in zip(target, target_cnt)]
-
-        indices = np.where(newPoints == GREEN)[0]
-        if len(indices):
-            obstacles = newPoints[indices]
-            obstacles_cnts = cnts[indices]
-            [draw_cnt(p, c) for p, c in zip(obstacles, obstacles_cnts)]
-
-        indices = np.where(newPoints == DAN)[0]
-        if len(indices):
-            dan = newPoints[indices]
-            dan_cnt = cnts[indices]
-            [draw_cnt(p, c) for p, c in zip(dan, dan_cnt)]
-
-        cv2.imshow("Result", imgResult)
-        time.sleep(0.1)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            g_obstacles = obstacles
-            g_targets = target
-            break
+    #         g_obstacles = obstacles
+    #         g_targets = target
+    #         break
 
     # while True:
     #
