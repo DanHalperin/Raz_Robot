@@ -95,13 +95,71 @@ def get_new_colors_range():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             exit(0)
 
+def find_angle(pt1, pt2):
+    pt1, pt2 = np.array(pt1), np.array(pt2)
+    diff = pt1 - pt2
+    radians = np.arctan2(diff[1], diff[0])
+    return (180 * radians / np.pi + 180) % 360
 
-def draw_cnt(img, p, cnt):
 
-    p = tuple(p)
-    text, heu = OBJECTS_TYPE[p[3]]
-    x, y, h, w = cv2.boundingRect(cnt)
-    cv2.rectangle(img, (x, y), (x + h, y + w), heu, 2)
-    cv2.putText(img, text, (x, y - 5), cv2.FONT_HERSHEY_COMPLEX, 0.7, heu, 2)
-    cv2.drawContours(img, cnt, -1, (90, 26, 170), 3)
-    cv2.circle(img, p[:2], p[2] + 10, (60, 200, 110), 2)
+def find_distance(pt1, pt2):
+    pt1, pt2 = np.array(pt1)[:2], np.array(pt2)[:2]
+    return np.sqrt(np.sum(np.square(pt1 - pt2)))
+
+
+def is_too_close_to_object(robot, obj):
+    xr, yr, rr, _ = robot
+    xo, yo, ro, _ = obj
+    dis = find_distance((xr, yr), (xo, yo))
+    if dis < ro or dis < rr:
+        return False
+    return dis <= ro + rr
+
+
+def draw_cnt(img, points, cnts):
+
+    points = np.array(points).astype(int)
+    if points.ndim < 2:
+        points = points[None]
+        cnts = [cnts]
+
+    for i in range(points.shape[0]):
+        p, cnt = tuple(points[i]), cnts[i]
+        text, heu = OBJECTS_TYPE[p[3]]
+        x, y, h, w = cv2.boundingRect(cnt)
+        cv2.rectangle(img, (x, y), (x + h, y + w), heu, 2)
+        cv2.putText(img, text, (x, y - 5), cv2.FONT_HERSHEY_COMPLEX, 0.7, heu, 2)
+        cv2.drawContours(img, cnt, -1, (90, 26, 170), 3)
+        cv2.circle(img, p[:2], p[2] + 10, (60, 200, 110), 2)
+
+def angle_to_origin():
+
+    orig_pos, iter = None, 0
+    blue_range = tuple(COLORS[BLUE])
+    lower, upper = blue_range[:3], blue_range[3:]
+    while True:
+        success, img = cap.read()
+        imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(imgHSV, lower, upper)
+
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        contours = imutils.grab_contours(contours)
+        if len(contours):
+            largest = max(contours, key=lambda x: cv2.contourArea(x))
+            current_pos, r = cv2.minEnclosingCircle(largest)
+            current_pos = tuple(int(x) for x in current_pos)
+            if not iter:
+                orig_pos = current_pos
+                iter += 1
+                continue
+
+            p = (*current_pos, int(r), BLUE)
+            draw_cnt(img, p, largest)
+            k = cv2.waitKey(1)
+            if k == ord("q"):
+                print(find_angle(orig_pos, current_pos), orig_pos, current_pos)
+            elif k == 27:
+                return
+
+            cv2.line(img, orig_pos, current_pos, (0, 0, 0), thickness=2)
+            cv2.imshow("Angles from Origin", np.hstack((img, np.flip(img, 0))))

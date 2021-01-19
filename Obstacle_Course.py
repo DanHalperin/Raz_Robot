@@ -1,4 +1,3 @@
-
 from Helper import *
 
 
@@ -23,11 +22,12 @@ def find_objects(img, my_colors=COLORS):
 def get_contours(img, color):
     contours = cv2.findContours(img, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
     contours = imutils.grab_contours(contours)
-
+    areas = [cv2.contourArea(x) for x in contours]
+    size_threshold = max(max(areas) * 0.8, AREAS_THRESH[color])
     points, res_contours = [], []
-    for cnt in contours:
+    for i, cnt in enumerate(contours):
         area = cv2.contourArea(cnt)
-        if area > AREAS_THRESH[color]:
+        if areas[i] > size_threshold:
             AREAS_THRESH[color] = max(AREAS_THRESH[color], area * 0.5)
             ((mid_x, mid_y), r) = cv2.minEnclosingCircle(cnt)
             mid_x, mid_y = int(mid_x), int(mid_y)
@@ -35,27 +35,6 @@ def get_contours(img, color):
                 points.append((mid_x, mid_y, r, color))
                 res_contours.append(cnt)
     return points, res_contours
-
-
-def find_angle(pt1, pt2):
-    pt1, pt2 = np.array(pt1), np.array(pt2)
-    diff = pt1 - pt2
-    radians = np.arctan2(diff[1], diff[0])
-    return (180 * radians / np.pi + 180) % 360
-
-
-def find_distance(pt1, pt2):
-    pt1, pt2 = np.array(pt1)[:2], np.array(pt2)[:2]
-    return np.sqrt(np.sum(np.square(pt1 - pt2)))
-
-
-def is_too_close_to_object(robot, obj):
-    xr, yr, rr, _ = robot
-    xo, yo, ro, _ = obj
-    dis = find_distance((xr, yr), (xo, yo))
-    if dis < ro or dis < rr:
-        return False
-    return dis <= ro + 2 * rr
 
 
 def remove_noise_contours(points):
@@ -91,7 +70,22 @@ def remove_noise_contours(points):
             return np.array(res), np.array(indices)
 
 
-def find_initinal_rob_angel():
+def find_robot(img):
+
+    while True:
+        blue_range = tuple(COLORS[BLUE])
+        lower, upper = blue_range[:3], blue_range[3:]
+        imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(imgHSV, lower, upper)
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        contours = imutils.grab_contours(contours)
+        if len(contours):
+            largest = max(contours, key=lambda x: cv2.contourArea(x))
+            current_pos, r = cv2.minEnclosingCircle(largest)
+            return (*current_pos, int(r), BLUE), largest
+
+
+def find_robot_initial_angle():
     """
     Find the initial angel of the robot, by moving it forward for 2 seconds, and then find the angel between the
     start and end positions.
@@ -101,36 +95,25 @@ def find_initinal_rob_angel():
     def _find_local_pos(stopby="key", time_num=3):
         assert stopby in ["key", "time"], "Stopby has to be either 'key' for stopping by pressing on 'q' " \
                                           "or 'time', for stopping after an amount in seconds given in arg 'time_num'"
-
-        blue_range = tuple(COLORS[BLUE])
-        lower, upper = blue_range[:3], blue_range[3:]
         t_end = time.time() + time_num
         while True:
             success, img = cap.read()
-            imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            mask = cv2.inRange(imgHSV, lower, upper)
-            mask_show = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-            contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-            contours = imutils.grab_contours(contours)
-            if len(contours):
-                largest = max(contours, key=lambda x: cv2.contourArea(x))
-                current_pos, r = cv2.minEnclosingCircle(largest)
-                p = (*[int(x) for x in current_pos], int(r), BLUE)
-                draw_cnt(img, p, largest)
-                if stopby == "key" and cv2.waitKey(1) & 0xFF == ord('q'):
-                    return current_pos
-                elif stopby == "time" and cv2.waitKey(1) and time.time() > t_end:
-                    return current_pos
+            p, cnt = find_robot(img)
+            draw_cnt(img, p, cnt)
+            if stopby == "key" and cv2.waitKey(1) & 0xFF == ord('q'):
+                return p[:2]
+            elif stopby == "time" and cv2.waitKey(1) and time.time() > t_end:
+                return p[:2]
             if stopby == "key":
                 print_message_to_img(img, "Locating Robot. Press 'q' when ready.")
             else:
                 print_message_to_img(img, f"On timer: {int(t_end - time.time()) + 1} sec left")
-            cv2.imshow("Result", np.hstack((img, mask_show)))
+            cv2.imshow("Result", img)
 
-    first_pos = np.array(_find_local_pos())
+    first_pos = _find_local_pos()
     # BLUETOOTH.write(str.encode(str(0)))
-    second_pos = np.array(_find_local_pos(stopby="time", time_num=2))
-    return find_angle(first_pos, second_pos), second_pos
+    second_pos = _find_local_pos(stopby="time", time_num=1)
+    return find_angle(first_pos, second_pos)
 
 
 def fix_obst_and_target():
@@ -159,39 +142,6 @@ def fix_obst_and_target():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             return obst, obst_cnt, tar, tar_cnt
 
-def angle_to_origin():
-
-    orig_pos, iter = None, 0
-    blue_range = tuple(COLORS[BLUE])
-    lower, upper = blue_range[:3], blue_range[3:]
-    while True:
-        success, img = cap.read()
-        imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(imgHSV, lower, upper)
-
-        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        contours = imutils.grab_contours(contours)
-        if len(contours):
-            largest = max(contours, key=lambda x: cv2.contourArea(x))
-            current_pos, r = cv2.minEnclosingCircle(largest)
-            current_pos = tuple(int(x) for x in current_pos)
-            if not iter:
-                orig_pos = current_pos
-                iter += 1
-                continue
-
-            p = (*current_pos, int(r), BLUE)
-            draw_cnt(img, p, largest)
-            k = cv2.waitKey(1)
-            if k == ord("q"):
-                print(find_angle(orig_pos, current_pos), orig_pos, current_pos)
-            elif k == 27:
-                return
-
-            cv2.line(img, orig_pos, current_pos, (0, 0, 0), thickness=2)
-            cv2.imshow("Angles from Origin", np.hstack((img, np.flip(img, 0))))
-
-
 
 if __name__ == '__main__':
 
@@ -200,24 +150,40 @@ if __name__ == '__main__':
     # - (Fix obstacles and target)
     # - Find the initial angle of the robot, and it's current position in the video
     obst, obst_cnt, tar, tar_cnt = fix_obst_and_target()
-    robot_angle, robot_pos = find_initinal_rob_angel()
+    robot_angle = find_robot_initial_angle()
 
-    tar = np.squeeze(tar)
-    assert tar.ndim == 1, f"Invalid number of targets: {tar.ndim}"
+    assert tar.shape[0] == 1, f"Invalid number of targets: {tar.shape[0]}"
+    tar = tar[0]
 
     while True:
-
+        _, img = cap.read()
         # 2) Find angle from robot to target
-        direction_angle = find_angle(robot_pos, tar[:2])
+        robot, robot_cnt = find_robot(img)
+        direction_angle = find_angle(robot[:2], tar[:2])
 
         # 3) Correct robot angle to direction_angle and move forward.
         pass
 
         # 4) if reached target, stop process.
-        pass
+        if is_too_close_to_object(robot, tar):
+            print("Hooray!!!!!!!")
+            exit(0)
 
         # 5) If reached obstacle, change to "avoid obstacle" mode
         pass
+
+        # points = [robot] + [obst] + [tar]
+        points = np.concatenate((np.array(robot)[None], obst, tar[None]), axis=0)
+        cnts = [robot_cnt] + obst_cnt + tar_cnt
+        draw_cnt(img, points, cnts)
+
+        cv2.imshow("Result", img)
+
+        if cv2.waitKey(1) == 27:
+            exit(0)
+
+
+
 
 
 
