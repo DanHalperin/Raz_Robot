@@ -24,7 +24,7 @@ LEFT = 2
 OBJECTS_TYPE = {RED: ("Target", (0, 0, 255)), GREEN: ("Obsticle", (0, 255, 0)), BLUE: ("Robot", (255, 0, 0)), DAN: ("Dan", (0, 0, 0))}
 AREAS_THRESH = [250, 250, 250]
 GOING_TO_TARGET = 0
-PASSING_BY_OBSTACLE = 1
+AVOID_OBST = 1
 
 
 PORT = 'COM9'
@@ -61,7 +61,7 @@ def create_color_trackbar(name="tracker"):
     cv2.createTrackbar('1_high', name, 0, 255, nothing)
     cv2.createTrackbar('2_high', name, 0, 255, nothing)
     cv2.createTrackbar('3_high', name, 0, 255, nothing)
-    cv2.setTrackbarPos("1_high", name, 255)
+    cv2.setTrackbarPos("1_high", name, 179)
     cv2.setTrackbarPos("2_high", name, 255)
     cv2.setTrackbarPos("3_high", name, 255)
     return name
@@ -83,13 +83,14 @@ def get_new_colors_range():
             create_color_trackbar("tracker")
         x = get_color_trackbar_values()
         imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # imgHSV = img
         lower = np.array(x[0:3])
         upper = np.array(x[3:6])
         mask = cv2.inRange(imgHSV, lower, upper)
         kernel = np.ones((5,5), dtype="uint8")
-        mask = cv2.erode(mask, kernel, iterations=1)
-        mask = cv2.dilate(mask, kernel, iterations=1)
-        cv2.imshow("tracker", mask)
+        # mask = cv2.erode(mask, kernel, iterations=1)
+        # mask = cv2.dilate(mask, kernel, iterations=1)
+        cv2.imshow("tracker", cv2.bitwise_and(imgHSV, imgHSV, mask=mask))
         print(x)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -97,9 +98,10 @@ def get_new_colors_range():
 
 def find_angle(pt1, pt2):
     pt1, pt2 = np.array(pt1), np.array(pt2)
-    diff = pt1 - pt2
+    diff = pt2 - pt1
     radians = np.arctan2(diff[1], diff[0])
-    return (180 * radians / np.pi + 180) % 360
+    deg = - (180 * radians / np.pi)
+    return deg % 360
 
 
 def find_distance(pt1, pt2):
@@ -108,12 +110,15 @@ def find_distance(pt1, pt2):
 
 
 def is_too_close_to_object(robot, obj):
+    robot, obj = np.array(robot), np.array(obj)
+    obj = obj[None] if obj.ndim == 1 else obj
     xr, yr, rr, _ = robot
-    xo, yo, ro, _ = obj
-    dis = find_distance((xr, yr), (xo, yo))
-    if dis < ro or dis < rr:
-        return False
-    return dis <= ro + rr
+    for o in obj:
+        xo, yo, ro, _ = o
+        dis = find_distance((xr, yr), (xo, yo))
+        if dis <= ro + rr:
+            return True
+    return False
 
 
 def draw_cnt(img, points, cnts):
@@ -132,11 +137,12 @@ def draw_cnt(img, points, cnts):
         cv2.drawContours(img, cnt, -1, (90, 26, 170), 3)
         cv2.circle(img, p[:2], p[2] + 10, (60, 200, 110), 2)
 
-def angle_to_origin():
+def angle_to_origin(c=BLUE):
 
-    orig_pos, iter = None, 0
-    blue_range = tuple(COLORS[BLUE])
+    orig_pos = tuple(np.array([frameWidth / 2, frameHeight / 2], dtype=int))
+    blue_range = tuple(COLORS[c])
     lower, upper = blue_range[:3], blue_range[3:]
+
     while True:
         success, img = cap.read()
         imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -148,18 +154,36 @@ def angle_to_origin():
             largest = max(contours, key=lambda x: cv2.contourArea(x))
             current_pos, r = cv2.minEnclosingCircle(largest)
             current_pos = tuple(int(x) for x in current_pos)
-            if not iter:
-                orig_pos = current_pos
-                iter += 1
-                continue
 
-            p = (*current_pos, int(r), BLUE)
+            p = (*current_pos, int(r), c)
             draw_cnt(img, p, largest)
             k = cv2.waitKey(1)
             if k == ord("q"):
                 print(find_angle(orig_pos, current_pos), orig_pos, current_pos)
+            elif k == ord("r"):
+                orig_pos = current_pos
             elif k == 27:
-                return
+                exit(0)
 
             cv2.line(img, orig_pos, current_pos, (0, 0, 0), thickness=2)
-            cv2.imshow("Angles from Origin", np.hstack((img, np.flip(img, 0))))
+        cv2.imshow("Angles from Origin", img)
+
+
+def get_hsv_mask(img, c):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    if c == RED:
+        mask1 = cv2.inRange(hsv, (0, 120, 70), (10, 255, 255))
+        mask2 = cv2.inRange(hsv, (170, 120, 70), (180, 255, 255))
+        return cv2.bitwise_or(mask2,  mask1)
+
+    elif c == GREEN:
+        return cv2.inRange(hsv, (35, 25, 25), (75, 255, 255))
+
+    elif c == BLUE:
+        return cv2.inRange(hsv, (112, 200, 70), (128, 255, 255))
+    else:
+        raise Exception("Wrong color input")
+
+
+
