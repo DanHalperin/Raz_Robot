@@ -5,11 +5,11 @@ import time
 import serial
 from scipy.spatial.distance import cdist
 
-frameWidth = 640
-frameHeight = 480
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
 cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
-cap.set(3, frameWidth)
-cap.set(4, frameHeight)
+cap.set(3, FRAME_WIDTH)
+cap.set(4, FRAME_HEIGHT)
 cap.set(10,150)
 
 GREEN = 0
@@ -139,7 +139,7 @@ def draw_cnt(img, points, cnts):
 
 def angle_to_origin(c=BLUE):
 
-    orig_pos = tuple(np.array([frameWidth / 2, frameHeight / 2], dtype=int))
+    orig_pos = tuple(np.array([FRAME_WIDTH / 2, FRAME_HEIGHT / 2], dtype=int))
     blue_range = tuple(COLORS[c])
     lower, upper = blue_range[:3], blue_range[3:]
 

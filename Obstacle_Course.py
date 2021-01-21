@@ -1,5 +1,4 @@
-from Helper import *
-
+from PathFinder import *
 
 def find_object_by_color(img, c):
 
@@ -145,6 +144,53 @@ def show_objects():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             exit()
 
+
+def follow_route(angle, route, brake_dis=10):
+    """
+    Follows a route given by tuples of indicies upon the grid (Bound by the values FRAME_WIDTH and FRAME_HEIGHT)
+    :param angle: current angle of obj in camera
+    :param tar: final destination
+    :param obst: obsticales on the route. -> listof(tuples(4))
+    :param robot: object (i.e a robot, a snake player, etc) -> tuple(4)
+    :param route: list of tuples, ordered by the route to some target. -> listof(tuples(2))
+    :return: boolean - success of getting to target.
+    """
+
+    curr_angle = angle
+    for next_pos in route:
+        while True:
+            _, img = cap.read()
+            obst, obst_cnts = find_object_by_color(img, GREEN)
+            tar, tar_cnt = extract_largest(*find_object_by_color(img, RED))
+            robot, robot_cnt = extract_largest(*find_object_by_color(img, BLUE))
+
+            if is_too_close_to_object(robot, obst):
+                # Recalculate path
+                new_route = search_path(img)
+                return follow_route(curr_angle, new_route)
+
+            if is_too_close_to_object(robot, tar):
+                return True
+
+            if is_too_close_to_object(robot, (*next_pos, brake_dis, None)):
+                break
+
+            curr_angle = find_angle(robot[:2], next_pos)
+            # SEND ANGLE TO ROBOT
+
+            points = [robot, *obst, tar]
+            cnts = [robot_cnt, *obst_cnts, tar_cnt]
+            draw_cnt(img, points, cnts)
+
+    return False
+
+def search_path(img):
+
+
+    return []
+
+
+
 if __name__ == '__main__':
 
     get_new_colors_range()
@@ -183,8 +229,8 @@ if __name__ == '__main__':
         pass
 
         # 2.5) Show objects on screen
-        points = np.concatenate((np.array(robot)[None], obst, tar[None]), axis=0)
-        cnts = [robot_cnt] + obst_cnts + [tar_cnt]
+        points = [robot, *obst, tar]
+        cnts = [robot_cnt, *obst_cnts, tar_cnt]
         draw_cnt(img, points, cnts)
 
         cv2.imshow("Result", img)
@@ -193,72 +239,4 @@ if __name__ == '__main__':
 
 
 
-
-    # iter = 0
-    # curr_state = GOING_TO_TARGET
-    # g_obstacles = None
-    # g_targets = None
-    # obstacles, target = [], []
-    # while True:
-    #     success, imgResult = cap.read()
-    #     newPoints, cnts = findColor(imgResult, myColors)
-    #
-    #     # Organize points according to role (Robot, obsticles, target)
-    #     indices = np.where(newPoints == BLUE)[0]
-    #     if len(indices):
-    #         robot = newPoints[indices]
-    #         robot_cnt = cnts[indices]
-    #         [draw_cnt(imgResult, p, c) for p, c in zip(robot, robot_cnt)]
-    #
-    #     indices = np.where(newPoints == RED)[0]
-    #     if len(indices):
-    #         target = newPoints[indices]
-    #         target_cnt = cnts[indices]
-    #         [draw_cnt(imgResult, p, c) for p, c in zip(target, target_cnt)]
-    #
-    #     indices = np.where(newPoints == GREEN)[0]
-    #     if len(indices):
-    #         obstacles = newPoints[indices]
-    #         obstacles_cnts = cnts[indices]
-    #         [draw_cnt(imgResult, p, c) for p, c in zip(obstacles, obstacles_cnts)]
-    #
-    #     indices = np.where(newPoints == DAN)[0]
-    #     if len(indices):
-    #         dan = newPoints[indices]
-    #         dan_cnt = cnts[indices]
-    #         [draw_cnt(imgResult, p, c) for p, c in zip(dan, dan_cnt)]
-    #
-    #     cv2.imshow("Result", imgResult)
-    #     time.sleep(0.1)
-    #
-    #     if cv2.waitKey(1) & 0xFF == ord('q'):
-    #         g_obstacles = obstacles
-    #         g_targets = target
-    #         break
-
-    # iter += 1
-
-
-# if not robot or not target:
-#     continue
-#
-# indices = np.where(newPoints == GREEN)[0]
-# obstacles = newPoints[indices]
-# obstacles_cnts = newPoints[indices]
-#
-# # Move car
-# angle_to_target = find_angel(robot, target)
-# angles_to_obstacles = [find_angel(robot, x) for x in obstacles]
-#
-# if curr_state == GOING_TO_TARGET:
-#     BLUETOOTH.write(str.encode(str(FORWARD)))
-#
-#     for obst in obstacles:
-#         if is_too_close_to_object(robot, obst):
-#             curr_state = PASSING_BY_OBSTACLE
-#             break
-# # curr_state = PASSING_BY_OBSTACLE
-# else:
-#
-#     BLUETOOTH.write(str.encode(str(RIGHT)))
 
