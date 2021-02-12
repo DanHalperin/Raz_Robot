@@ -88,22 +88,26 @@ def find_robot_initial_angle():
         while True:
             success, img = cap.read()
             p, cnt = extract_largest(*find_object_by_color(img, BLUE))
-            draw_cnt(img, p, cnt)
-            if stopby == "key":
-                print_message_to_img(img, "Locating Robot. Press 'q' when ready.")
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    return p[:2]
-            elif stopby == "time":
-                print_message_to_img(img, f"On timer: {int(t_end - time.time()) + 1} sec left")
-                if cv2.waitKey(1) and time.time() > t_end:
-                    return p[:2]
+            if len(p):
+                draw_cnt(img, p, cnt)
+                if stopby == "key":
+                    print_message_to_img(img, "Locating Robot. Press 'q' when ready.")
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        return p[:2]
+                elif stopby == "time":
+                    print_message_to_img(img, f"On timer: {int(t_end - time.time()) + 1} sec left")
+                    if cv2.waitKey(1) and time.time() > t_end:
+                        send_to_robot(999)
+                        stopby = "key"
             cv2.imshow("Result", img)
             out_vid.write(img)
 
     first_pos = _find_local_pos()
-    # BLUETOOTH.write(str.encode(str(0)))
-    second_pos = _find_local_pos(stopby="time", time_num=1)
-    return find_angle(first_pos, second_pos)
+    send_to_robot(0)
+    second_pos = _find_local_pos(stopby="time", time_num=7)
+    rob_angle = find_angle(first_pos, second_pos)
+    send_to_robot(400 + rob_angle)
+    return rob_angle
 
 
 def fix_obst_and_target():
@@ -271,25 +275,26 @@ if __name__ == '__main__':
     # 1) Preprocessing :
     # - (Fix obstacles and target)
     # - Find the initial angle of the robot, and it's current position in the video
-
-    show_objects()
+    angle_to_origin()
+    # send_to_robot(999)  # Prevent the robot from moving until needed.
+    # show_objects()
     init_angle = find_robot_initial_angle()
 
-    _, img = cap.read()
-
-    obst, obst_cnts = find_object_by_color(img, GREEN)
-    tar, tar_cnt = extract_largest(*find_object_by_color(img, RED))
-    robot, robot_cnt = extract_largest(*find_object_by_color(img, BLUE))
-
-    # while True:
-    #     draw_route(img, [[107, 384], [305, 312], [528, 309]])
-    #     cv2.imshow("Result", img)
+    # _, img = cap.read()
     #
-    #     if cv2.waitKey(1) & 0xFF == ord("q"):
-    #         exit(0)
-
-    path = search_path(img, robot, obst, tar, init_angle)
-    follow_route(init_angle, path, robot, tar)
+    # obst, obst_cnts = find_object_by_color(img, GREEN)
+    # tar, tar_cnt = extract_largest(*find_object_by_color(img, RED))
+    # robot, robot_cnt = extract_largest(*find_object_by_color(img, BLUE))
+    #
+    # # while True:
+    # #     draw_route(img, [[107, 384], [305, 312], [528, 309]])
+    # #     cv2.imshow("Result", img)
+    # #
+    # #     if cv2.waitKey(1) & 0xFF == ord("q"):
+    # #         exit(0)
+    #
+    # path = search_path(img, robot, obst, tar, init_angle)
+    # follow_route(init_angle, path, robot, tar)
 
 
 

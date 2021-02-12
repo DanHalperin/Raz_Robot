@@ -32,8 +32,8 @@ WINDOW_NAME = "Result"
 
 
 PORT = 'COM9'
-#BLUETOOTH = serial.Serial(PORT, 9600)
-#BLUETOOTH.flushInput()
+BLUETOOTH = serial.Serial(PORT, 9600)
+BLUETOOTH.flushInput()
 
 # COLORS = [[0, 100, 0, 113, 199, 170],    #green
 #             [171,101,174,179,252,255], #red
@@ -41,8 +41,8 @@ PORT = 'COM9'
 #             # list((12, 91, 83, 60, 255, 251))]
 
 COLORS = [[46, 62, 42, 90, 199, 212],    #green
-            [0, 47, 183, 255, 255, 255], #red
-            [95, 109, 84, 255, 255, 255]]#   #blue
+            [0, 133, 220, 12, 236, 255], #red
+            [96, 52, 141, 107, 209, 250]]#   #blue
 
 
 def print_title(title):
@@ -224,3 +224,6 @@ def draw_route(img, route):
 
 def is_in_board_limits(point):
     return 0 <= point[0] <= FRAME_HEIGHT and 0 <= point[1] <= FRAME_WIDTH
+
+def send_to_robot(angle):
+    BLUETOOTH.write(str.encode(str(angle)))
