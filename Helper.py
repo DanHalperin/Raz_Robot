@@ -10,7 +10,9 @@ FRAME_HEIGHT = 480
 cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
 cap.set(3, FRAME_WIDTH)
 cap.set(4, FRAME_HEIGHT)
-cap.set(10,150)
+cap.set(10, 150)
+fourcc = cv2.VideoWriter_fourcc(*'MP4V')
+out_vid = cv2.VideoWriter('output.mp4', 0x7634706d, 20.0, (640, 480))
 
 GREEN = 0
 RED = 1
@@ -20,11 +22,13 @@ DAN = 3
 FORWARD = 0
 RIGHT = 1
 LEFT = 2
-
+FACTOR = 10
 OBJECTS_TYPE = {RED: ("Target", (0, 0, 255)), GREEN: ("Obsticle", (0, 255, 0)), BLUE: ("Robot", (255, 0, 0)), DAN: ("Dan", (0, 0, 0))}
 AREAS_THRESH = [250, 250, 250]
+DIRECTIONS_ADDONS = np.array([[0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1]]) * FACTOR
 GOING_TO_TARGET = 0
 AVOID_OBST = 1
+WINDOW_NAME = "Result"
 
 
 PORT = 'COM9'
@@ -109,16 +113,20 @@ def find_distance(pt1, pt2):
     return np.sqrt(np.sum(np.square(pt1 - pt2)))
 
 
-def is_too_close_to_object(robot, obj):
-    robot, obj = np.array(robot), np.array(obj)
+def is_too_close_to_object(source, obj, mode="out"):
+    assert mode in ["out", "in"]
+
+    if not len(obj) or not len(source):
+        return False
+
+    source, obj = np.array(source, dtype=int), np.array(obj, dtype=int)
     obj = obj[None] if obj.ndim == 1 else obj
-    xr, yr, rr, _ = robot
-    for o in obj:
-        xo, yo, ro, _ = o
-        dis = find_distance((xr, yr), (xo, yo))
-        if dis <= ro + rr:
-            return True
-    return False
+    dis = d(source[:2], obj[:, :2])
+    if mode == "out":
+        radius = obj[:, 2] * 1.5 + source[2]
+    else:
+        radius = obj[:, 2] + source[2]
+    return np.any(dis < radius)
 
 
 def draw_cnt(img, points, cnts):
@@ -136,6 +144,7 @@ def draw_cnt(img, points, cnts):
         cv2.putText(img, text, (x, y - 5), cv2.FONT_HERSHEY_COMPLEX, 0.7, heu, 2)
         cv2.drawContours(img, cnt, -1, (90, 26, 170), 3)
         cv2.circle(img, p[:2], p[2] + 10, (60, 200, 110), 2)
+
 
 def angle_to_origin(c=BLUE):
 
@@ -170,20 +179,48 @@ def angle_to_origin(c=BLUE):
 
 
 def get_hsv_mask(img, c):
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    if c == RED:
-        mask1 = cv2.inRange(hsv, (0, 120, 70), (10, 255, 255))
-        mask2 = cv2.inRange(hsv, (170, 120, 70), (180, 255, 255))
-        return cv2.bitwise_or(mask2,  mask1)
+    color = COLORS[c]
+    imgHSV = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    lower, upper = np.array(color[:3]), np.array(color[3:])
+    return cv2.inRange(imgHSV, lower, upper)
 
-    elif c == GREEN:
-        return cv2.inRange(hsv, (35, 25, 25), (75, 255, 255))
 
-    elif c == BLUE:
-        return cv2.inRange(hsv, (112, 200, 70), (128, 255, 255))
+def angle_to_direction(angle):
+    """Each pixel in an image is surrounded by a maximum of 8 pixels, so an angle from the
+    range of [0, 360) is out in one of 8 bins, where each bin is of size of 360 / 8 = 45
+    degrees. """
+    return ((angle + 22.5) // 45) % 8
+
+
+def d(a, b, mode="man"):
+    a, b = np.array(a, dtype=int), np.array(b, dtype=int)
+    if mode == "man":
+        return np.sum(np.abs(a - b))
+    elif mode == "norm":
+        return np.linalg.norm(a-b)
     else:
-        raise Exception("Wrong color input")
+        raise Exception("Invalid mode for distance calculation")
 
 
+def extract_path(came_from, pos):
 
+    path = [pos]
+    while pos:
+        pos = came_from[pos]
+        if pos:
+            path.append(pos)
+
+    return list(reversed(path))
+
+
+def draw_route(img, route):
+    ind = np.arange(0, len(route), max(1, int(len(route) / 9)))
+    stops = [tuple(x) for x in np.array(route)[ind]]
+    for i in range(len(stops) - 1):
+        cv2.circle(img, stops[i], radius=2, color=(255, 0, 0),thickness=2)
+        cv2.line(img, stops[i], stops[i + 1], color=(0, 0, 0), thickness=2)
+
+
+def is_in_board_limits(point):
+    return 0 <= point[0] <= FRAME_HEIGHT and 0 <= point[1] <= FRAME_WIDTH
